@@ -7,6 +7,7 @@ for use with AI assistants like ChatGPT, Claude, etc.
 
 Author: Your Name
 License: MIT
+Version: 1.1.0 - Improved Terraform/Infrastructure support
 """
 
 import os
@@ -20,7 +21,7 @@ import re
 from typing import Dict, List, Any, Optional, Tuple
 import mimetypes
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 class RepoContextGenerator:
     """Universal repository context generator for AI assistants"""
@@ -45,22 +46,26 @@ class RepoContextGenerator:
             'ruby': ['Gemfile', 'Gemfile.lock', '.ruby-version'],
             'php': ['composer.json', 'composer.lock'],
             'csharp': ['*.csproj', '*.sln', 'packages.config'],
-            'cpp': ['CMakeLists.txt', 'Makefile', '*.cpp', '*.h'],
-            'terraform': ['*.tf', 'terragrunt.hcl', '*.tfvars'],
-            'kubernetes': ['k8s/*.yaml', 'k8s/*.yml', 'kubernetes/*.yaml'],
-            'docker': ['Dockerfile', 'docker-compose.yml', 'docker-compose.yaml'],
-            'ansible': ['ansible.cfg', 'playbook.yml', 'requirements.yml'],
+            # Removed cpp to avoid false positives from Makefile
+            'terraform': ['*.tf', 'terragrunt.hcl', '*.tfvars', 'versions.tf'],
+            'kubernetes': ['k8s/*.yaml', 'k8s/*.yml', 'kubernetes/*.yaml', 'helmfile.yaml'],
+            'docker': ['Dockerfile', 'docker-compose.yml', 'docker-compose.yaml', 'Containerfile'],
+            'ansible': ['ansible.cfg', 'playbook.yml', 'requirements.yml', 'inventory'],
         }
         
         # Important files to always include
         self.important_files = [
             'README.md', 'README.rst', 'README.txt', 'README',
+            'STATUS.md', 'TODO.md', 'ROADMAP.md',
             'LICENSE', 'LICENSE.md', 'LICENSE.txt',
             'CONTRIBUTING.md', 'CHANGELOG.md', 'CHANGELOG',
-            '.env.example', '.env.sample',
-            'Makefile', 'makefile',
-            '.github/workflows/*.yml', '.gitlab-ci.yml',
-            'Jenkinsfile', 'azure-pipelines.yml',
+            '.env.example', '.env.sample', '.env.template',
+            'Makefile', 'makefile', 'GNUmakefile',
+            'terragrunt.hcl', 'common.hcl', 'account.hcl', 'backend.hcl',
+            'versions.tf', 'main.tf', 'variables.tf', 'outputs.tf', 'providers.tf',
+            '.github/workflows/*.yml', '.github/workflows/*.yaml',
+            '.gitlab-ci.yml', 'azure-pipelines.yml', '.circleci/config.yml',
+            'Jenkinsfile', 'bitbucket-pipelines.yml',
         ]
         
         # Directories to skip
@@ -70,17 +75,18 @@ class RepoContextGenerator:
             'target', 'build', 'dist', 'out', '.terraform',
             '.terragrunt-cache', 'coverage', '.next', '.nuxt',
             '.idea', '.vscode', 'logs', 'tmp', 'temp',
+            '.aws-sam', '.serverless', 'cdk.out',
         }
         
         # File extensions to skip
         self.skip_extensions = {
             '.pyc', '.pyo', '.pyd', '.so', '.dll', '.dylib',
             '.class', '.jar', '.war', '.exe', '.bin',
-            '.jpg', '.jpeg', '.png', '.gif', '.ico', '.svg',
-            '.mp3', '.mp4', '.avi', '.mov', '.pdf',
-            '.zip', '.tar', '.gz', '.rar', '.7z',
-            '.log', '.bak', '.swp', '.tmp', '.cache',
-            '.min.js', '.min.css', '.map',
+            '.jpg', '.jpeg', '.png', '.gif', '.ico', '.svg', '.webp',
+            '.mp3', '.mp4', '.avi', '.mov', '.pdf', '.doc', '.docx',
+            '.zip', '.tar', '.gz', '.rar', '.7z', '.bz2',
+            '.log', '.bak', '.swp', '.tmp', '.cache', '.lock',
+            '.min.js', '.min.css', '.map', '.tfstate', '.tfplan',
         }
 
     def detect_project_types(self) -> List[str]:
@@ -112,7 +118,7 @@ class RepoContextGenerator:
                 
                 for i, item in enumerate(items):
                     # Skip hidden files/dirs except important ones
-                    if item.name.startswith('.') and item.name not in ['.github', '.gitlab-ci.yml', '.env.example']:
+                    if item.name.startswith('.') and item.name not in ['.github', '.gitlab-ci.yml', '.env.example', '.circleci']:
                         continue
                         
                     # Skip excluded directories
@@ -146,6 +152,10 @@ class RepoContextGenerator:
     def get_file_content(self, file_path: Path, max_lines: int = 50) -> Optional[str]:
         """Safely read file content with size limits"""
         try:
+            # Skip if in skip directories
+            if any(skip_dir in str(file_path) for skip_dir in ['.terragrunt-cache', '.terraform']):
+                return None
+                
             # Check file size first
             file_size = file_path.stat().st_size
             if file_size > self.max_file_size:
@@ -205,6 +215,14 @@ class RepoContextGenerator:
             content = (self.repo_path / "go.mod").read_text().split('\n')
             if content:
                 info['go_module'] = content[0].replace('module ', '').strip()
+                
+        # Terraform
+        if (self.repo_path / "versions.tf").exists() or (self.repo_path / "terragrunt.hcl").exists():
+            info['terraform'] = {
+                'has_terragrunt': (self.repo_path / "terragrunt.hcl").exists(),
+                'has_versions_tf': (self.repo_path / "versions.tf").exists(),
+                'modules': [d.name for d in (self.repo_path / "modules").iterdir() if d.is_dir()] if (self.repo_path / "modules").exists() else []
+            }
                 
         return info
 
@@ -267,9 +285,9 @@ class RepoContextGenerator:
         
         patterns = [
             # Python
-            ('Python', ['main.py', 'app.py', 'run.py', 'manage.py', '__main__.py', 'cli.py']),
+            ('Python', ['main.py', 'app.py', 'run.py', 'manage.py', '__main__.py', 'cli.py', 'wsgi.py']),
             # JavaScript/Node
-            ('JavaScript', ['index.js', 'app.js', 'server.js', 'main.js', 'index.ts']),
+            ('JavaScript', ['index.js', 'app.js', 'server.js', 'main.js', 'index.ts', 'server.ts']),
             # Java
             ('Java', ['**/Main.java', '**/Application.java', 'src/main/java/**/*Application.java']),
             # Go
@@ -280,6 +298,8 @@ class RepoContextGenerator:
             ('C#', ['Program.cs', '**/Program.cs']),
             # PHP
             ('PHP', ['index.php', 'app.php']),
+            # Ruby
+            ('Ruby', ['app.rb', 'application.rb', 'config.ru']),
         ]
         
         for lang, files in patterns:
@@ -287,13 +307,65 @@ class RepoContextGenerator:
                 if '*' in pattern:
                     matches = list(self.repo_path.glob(pattern))[:3]
                     for match in matches:
-                        entry_points.append((lang, str(match.relative_to(self.repo_path))))
+                        if not any(skip in str(match) for skip in self.skip_dirs):
+                            entry_points.append((lang, str(match.relative_to(self.repo_path))))
                 else:
                     file_path = self.repo_path / pattern
                     if file_path.exists():
                         entry_points.append((lang, pattern))
                         
         return entry_points
+
+    def _find_terraform_files(self) -> List[Path]:
+        """Find Terraform and Terragrunt files"""
+        terraform_files = []
+        
+        # Root terragrunt.hcl is most important
+        root_terragrunt = self.repo_path / "terragrunt.hcl"
+        if root_terragrunt.exists():
+            terraform_files.append(root_terragrunt)
+        
+        # Other important root HCL files
+        for hcl_file in ['common.hcl', 'account.hcl', 'backend.hcl', 'empty.hcl']:
+            file_path = self.repo_path / hcl_file
+            if file_path.exists():
+                terraform_files.append(file_path)
+        
+        # Root terraform files
+        for pattern in ['*.tf', '*.tfvars.example']:
+            terraform_files.extend(self.repo_path.glob(pattern))
+        
+        # Module files
+        modules_dir = self.repo_path / "modules"
+        if modules_dir.exists():
+            for module_dir in modules_dir.iterdir():
+                if module_dir.is_dir():
+                    # Add main.tf first, then others
+                    main_tf = module_dir / "main.tf"
+                    if main_tf.exists():
+                        terraform_files.append(main_tf)
+                    for tf_file in module_dir.glob("*.tf"):
+                        if tf_file.name != "main.tf":
+                            terraform_files.append(tf_file)
+        
+        # Account terragrunt files (excluding cache)
+        for tg_file in self.repo_path.glob("accounts/**/terragrunt.hcl"):
+            if '.terragrunt-cache' not in str(tg_file):
+                terraform_files.append(tg_file)
+                
+        return terraform_files[:30]  # Increased limit for terraform projects
+
+    def _find_policy_files(self) -> List[Path]:
+        """Find policy files (JSON, YAML)"""
+        policy_files = []
+        
+        # Check policies directory
+        policies_dir = self.repo_path / "policies"
+        if policies_dir.exists():
+            for ext in ['*.json', '*.yaml', '*.yml']:
+                policy_files.extend(policies_dir.glob(f"**/{ext}"))
+                
+        return [f for f in policy_files if '.git' not in str(f)][:15]
 
     def add_section(self, title: str, content: str):
         """Add a section to the context output"""
@@ -354,22 +426,51 @@ for use with AI assistants.
                 ep_content.append(f"- **{lang}:** `{file}`")
             self.add_section("Entry Points", '\n'.join(ep_content))
 
-        # Important Files
+        # Key Files - Prioritize STATUS.md first
         self.add_section("Key Files", "")
         
+        # First, always try to add STATUS.md if it exists
+        status_file = self.repo_path / "STATUS.md"
+        if status_file.exists() and self.total_size < self.max_total_size * 0.8:
+            self._add_file_content(status_file)
+        
+        # Then add other important files
         for pattern in self.important_files:
-            if self.total_size > self.max_total_size * 0.8:  # Stop at 80% of max size
+            if self.total_size > self.max_total_size * 0.8:
                 self.context_parts.append("\n*(Reached size limit, some files omitted)*\n")
                 break
+                
+            if pattern == "STATUS.md":  # Skip since we already added it
+                continue
                 
             if '*' in pattern:
                 files = list(self.repo_path.glob(pattern))[:3]
                 for file in files:
-                    self._add_file_content(file)
+                    if not any(skip in str(file) for skip in ['.terragrunt-cache', '.terraform']):
+                        self._add_file_content(file)
             else:
                 file_path = self.repo_path / pattern
                 if file_path.exists():
                     self._add_file_content(file_path)
+
+        # Terraform/Terragrunt specific files
+        if 'terraform' in project_types and self.total_size < self.max_total_size * 0.85:
+            terraform_files = self._find_terraform_files()
+            if terraform_files:
+                self.add_section("Terraform/Terragrunt Configuration", "")
+                for tf_file in terraform_files:
+                    if self.total_size > self.max_total_size * 0.9:
+                        break
+                    self._add_file_content(tf_file)
+            
+            # Policy files
+            policy_files = self._find_policy_files()
+            if policy_files and self.total_size < self.max_total_size * 0.95:
+                self.add_section("Policy Files", "")
+                for policy_file in policy_files:
+                    if self.total_size > self.max_total_size * 0.95:
+                        break
+                    self._add_file_content(policy_file)
 
         # Configuration Files
         config_files = self._find_config_files()
@@ -392,10 +493,11 @@ for use with AI assistants.
 
     def _add_file_content(self, file_path: Path):
         """Add file content to context"""
-        relative_path = file_path.relative_to(self.repo_path)
         content = self.get_file_content(file_path)
         
         if content and self.total_size + len(content) < self.max_total_size:
+            relative_path = file_path.relative_to(self.repo_path)
+            
             # Determine language for syntax highlighting
             lang = self._get_language_for_file(file_path)
             
@@ -414,10 +516,16 @@ for use with AI assistants.
             '.yml': 'yaml', '.yaml': 'yaml', '.json': 'json',
             '.xml': 'xml', '.html': 'html', '.css': 'css',
             '.md': 'markdown', '.rst': 'rst', '.tex': 'latex',
-            '.tf': 'hcl', '.dockerfile': 'dockerfile', '.Dockerfile': 'dockerfile',
+            '.tf': 'hcl', '.hcl': 'hcl', '.tfvars': 'hcl',
+            '.dockerfile': 'dockerfile', '.Dockerfile': 'dockerfile',
             '.gradle': 'gradle', '.Makefile': 'makefile', '.makefile': 'makefile',
+            '.toml': 'toml', '.ini': 'ini', '.cfg': 'ini',
         }
         
+        # Check full filename first
+        if file_path.name in ['Dockerfile', 'Makefile', 'Jenkinsfile']:
+            return file_path.name.lower()
+            
         suffix = file_path.suffix.lower()
         return ext_map.get(suffix, 'text')
 
@@ -428,13 +536,14 @@ for use with AI assistants.
             '.eslintrc*', '.prettierrc*', 'tsconfig.json',
             'webpack.config.js', 'babel.config.js', 'jest.config.js',
             '.flake8', 'setup.cfg', 'tox.ini', 'pytest.ini',
+            'serverless.yml', 'serverless.yaml', 'sam.yaml', 'sam.yml',
         ]
         
         config_files = []
         for pattern in config_patterns:
             config_files.extend(self.repo_path.glob(pattern))
             
-        return config_files[:20]  # Limit to 20 config files
+        return [f for f in config_files if not any(skip in str(f) for skip in self.skip_dirs)][:20]
 
     def _add_source_samples(self, project_types: List[str]):
         """Add sample source code based on project type"""
@@ -452,7 +561,8 @@ for use with AI assistants.
             'go': ['**/*.go'],
             'rust': ['**/*.rs'],
             'csharp': ['**/*.cs'],
-            'cpp': ['**/*.cpp', '**/*.h'],
+            'terraform': ['**/*.tf', '**/*.hcl'],
+            'kubernetes': ['**/*.yaml', '**/*.yml'],
         }
         
         for proj_type in project_types[:2]:  # Limit to first 2 project types
@@ -462,8 +572,8 @@ for use with AI assistants.
                 for pattern in patterns:
                     files = []
                     for f in self.repo_path.glob(pattern):
-                        # Skip test files and vendored code
-                        if any(skip in str(f) for skip in ['test', 'vendor', 'node_modules', '__pycache__']):
+                        # Skip test files, vendored code, and cache directories
+                        if any(skip in str(f) for skip in ['test', 'vendor', 'node_modules', '__pycache__', '.terragrunt-cache', '.terraform']):
                             continue
                         if f.is_file() and f.stat().st_size < 50000:  # Skip large files
                             files.append(f)
