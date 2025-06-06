@@ -6,10 +6,12 @@ Generate AI-friendly context files from any repository to use with ChatGPT, Clau
 
 ### One-line Install & Run
 
-```bash
-# Download and run directly
-curl -sSL https://raw.githubusercontent.com/yourusername/repo-context-generator/main/repo-context-generator.py | python3 - .
-```
+# Test if the script can be downloaded and run directly
+curl -sSL https://raw.githubusercontent.com/jasaulakh1988/repo-context-generator/main/repo-context-generator.py -o test-context.py
+python3 test-context.py --help
+
+# Or run directly without saving
+curl -sSL https://raw.githubusercontent.com/jasaulakh1988/repo-context-generator/main/repo-context-generator.py | python3 - --help
 
 ### Install Globally
 
